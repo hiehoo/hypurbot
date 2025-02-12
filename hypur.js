@@ -49,7 +49,7 @@ Average Price: ${calculateAverage(rawData.auctionElements)}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⏱ Updated: ${new Date().toLocaleString()}
-🌐 Source: hypurrscan.io
+🌐 Source: hypurrscan.io/dashboard
 
 Commands:
 📊 /price - Get instant update
@@ -258,7 +258,6 @@ function calculateAverage(auctions) {
 
 
 
-
 // Bot commands
 bot.command('start', (ctx) => {
     const chatId = ctx.chat.id;
@@ -329,10 +328,103 @@ async function updatePrice() {
         console.error('Update price error:', error);
     }
 }
+// Update function with immediate first run and hourly updates
+async function setupAutomaticUpdates() {
+    // First run immediately
+    console.log('Starting automatic updates...');
+    await updatePrice();
 
-// Start hourly updates
-const ONE_HOUR = 60 * 60 * 1000;
-setInterval(updatePrice, ONE_HOUR);
+    // Set up hourly updates
+    const ONE_HOUR = 60 * 60 * 1000; // 1 hour in milliseconds
+    
+    // Create an interval
+    const updateInterval = setInterval(async () => {
+        console.log(`Running scheduled update at ${new Date().toLocaleString()}`);
+        await updatePrice();
+    }, ONE_HOUR);
+
+    // Log next update time
+    console.log(`Next update scheduled for: ${new Date(Date.now() + ONE_HOUR).toLocaleString()}`);
+
+    // Handle cleanup on bot shutdown
+    process.once('SIGINT', () => {
+        clearInterval(updateInterval);
+        bot.stop('SIGINT');
+    });
+    process.once('SIGTERM', () => {
+        clearInterval(updateInterval);
+        bot.stop('SIGTERM');
+    });
+}
+
+// Update function with better logging and error handling
+async function updatePrice() {
+    const currentTime = new Date().toLocaleString();
+    console.log(`Running price update at ${currentTime}`);
+
+    if (activeChatIds.size === 0) {
+        console.log('No active chats to notify for price update');
+        return;
+    }
+
+    try {
+        console.log('Fetching new data...');
+        const rawData = await scrapeHypurrScan();
+        
+        if (rawData) {
+            console.log('Data fetched successfully, formatting message...');
+            const formattedMessage = formatAuctionMessage(rawData, 'Hourly');
+
+            console.log(`Sending updates to ${activeChatIds.size} active chats...`);
+            for (const chatId of activeChatIds) {
+                try {
+                    await bot.telegram.sendMessage(chatId, formattedMessage, { 
+                        parse_mode: 'HTML',
+                        disable_web_page_preview: true 
+                    });
+                    console.log(`Update sent successfully to chat ${chatId}`);
+                } catch (error) {
+                    console.error(`Failed to send price update to chat ${chatId}:`, error.message);
+                    if (error.message.includes('chat not found')) {
+                        activeChatIds.delete(chatId);
+                        console.log(`Removed invalid chat ID: ${chatId}`);
+                    }
+                }
+            }
+            console.log('Update cycle completed successfully');
+        } else {
+            console.error('Failed to fetch data');
+        }
+    } catch (error) {
+        console.error('Update price error:', error);
+    }
+
+    // Log next update time
+    console.log(`Next update scheduled for: ${new Date(Date.now() + ONE_HOUR).toLocaleString()}`);
+}
+
+// Modify your bot launch code to include the automatic updates
+bot.launch()
+    .then(() => {
+        console.log('Bot started successfully');
+        console.log('Setting up automatic updates...');
+        setupAutomaticUpdates();
+        console.log('Send /start to the bot to begin monitoring');
+    })
+    .catch((err) => console.error('Bot failed to start:', err));
+
+// Add a command to check next update time
+bot.command('nextupdatetime', (ctx) => {
+    const nextUpdate = new Date(Math.ceil(Date.now() / ONE_HOUR) * ONE_HOUR);
+    ctx.reply(`Next update scheduled for: ${nextUpdate.toLocaleString()}`);
+});
+
+// Add a command to force an immediate update
+bot.command('forceupdate', async (ctx) => {
+    ctx.reply('Forcing immediate update...');
+    await updatePrice();
+    ctx.reply('Update completed!');
+});
 
 // Launch bot
 bot.launch()
