@@ -12,13 +12,16 @@
   },
   "devDependencies": {
     "native": "^0.3.3",
+    "nodemon": "^3.1.9",
     "ws": "^8.18.0"
   },
   "name": "hypurbot",
   "version": "1.0.0",
   "main": "chatID.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node hypur.js",
+    "dev": "nodemon hypur.js"
   },
   "keywords": [],
   "author": "",
