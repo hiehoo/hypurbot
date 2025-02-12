@@ -1,0 +1,8 @@
+[build]
+  publish = "."  # Root directory since we're not serving static files
+  functions = "functions"  # Directory where your functions will be stored
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
