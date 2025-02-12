@@ -3,7 +3,7 @@ const { Telegraf } = require('telegraf');
 const puppeteer = require('puppeteer');
 require('dotenv').config();
 
-// Get bot token from environment variables
+// Get bot token from environment variables 
 const BOT_TOKEN = process.env.NEXT_PUBLIC_BOT_TOKEN;
 if (!BOT_TOKEN) {
     console.error('NEXT_PUBLIC_BOT_TOKEN is not set in .env file');
@@ -67,157 +67,132 @@ Commands:
 }
 
 // Update the scrapeHypurrScan function to ensure it returns the correct data structure
-async function scrapeHypurrScan() {
+async function scrapeHypurrScan(retries = 3) {
+    let browser = null;
+    
     try {
-        const response = await axios.get('https://hypurrscan.io/dashboard');
+        console.log('Starting scraping attempt...');
+        
+        browser = await puppeteer.launch({ 
+            headless: "new",
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu'
+            ]
+        });
 
-        if (response.status !== 200) {
-            throw new Error('Failed to fetch data');
+        const page = await browser.newPage();
+        
+        // Set various timeouts
+        await page.setDefaultNavigationTimeout(120000); // 2 minutes
+        await page.setDefaultTimeout(120000);
+
+        // Optimize page load
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            // Block unnecessary resources
+            const resourceType = request.resourceType();
+            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+                request.abort();
+            } else {
+                request.continue();
+            }
+        });
+
+        console.log('Navigating to page...');
+        const response = await page.goto('https://hypurrscan.io/dashboard', {
+            waitUntil: ['domcontentloaded', 'networkidle2'],
+            timeout: 120000
+        });
+
+        if (!response.ok()) {
+            throw new Error(`Page response was not ok: ${response.status()}`);
         }
 
-        const html = response.data;
-        const $ = cheerio.load(html);
+        console.log('Waiting for selector...');
+        await page.waitForSelector('.v-card-text', { 
+            timeout: 60000,
+            visible: true 
+        });
 
-        // Get the next auction text (contains time and starting price)
-        const nextAuctionText = $('.v-card-text').first().text().trim();
+        console.log('Extracting data...');
+        const data = await page.evaluate(() => {
+            // Debug logging
+            console.log('Starting data extraction');
 
-        if (!nextAuctionText) {
-            throw new Error('Failed to extract next auction time');
-        }
+            // Get all text content from the auction card
+            const auctionCard = Array.from(document.querySelectorAll('.v-card-text'))
+                .find(card => card.textContent.includes('Next auction'));
 
-        // Get the auction elements (recent auctions)
-        const auctionElements = $('.v-card-text').toArray().slice(1).map(element => {
-            const text = $(element).text().trim();
-            const [name, price] = text.split(' for ');
+            if (!auctionCard) {
+                console.log('Auction card not found');
+                return null;
+            }
+
+            console.log('Found auction card:', auctionCard.textContent);
+
+            // Extract auction information
+            const auctionInfo = auctionCard.querySelector('p:first-child');
+            const nextAuctionText = auctionInfo ? auctionInfo.textContent : '';
+            console.log('Next auction text:', nextAuctionText);
+
+            // Extract last auctions
+            const auctionElements = Array.from(auctionCard.querySelectorAll('p'))
+                .filter(p => p.textContent.includes('for'))
+                .map(p => {
+                    const text = p.textContent;
+                    console.log('Auction element text:', text);
+                    const [name, price] = text.split(' for ');
+                    return {
+                        name: name.trim(),
+                        price: price ? price.trim() : ''
+                    };
+                });
+
+            console.log('Extracted auctions:', auctionElements);
+
             return {
-                name: name.trim(),
-                price: price ? price.trim() : ''
+                nextAuctionText,
+                auctionElements
             };
         });
 
-        return {
-            nextAuctionText,
-            auctionElements
-        };
+        if (!data) {
+            throw new Error('No data extracted from page');
+        }
+
+        await browser.close();
+        browser = null;
+        
+        console.log('Scraping completed successfully');
+        return data;
+
     } catch (error) {
-        console.error('Scraping error:', error);
-        return null;
+        console.error(`Scraping attempt failed: ${error.message}`);
+        
+        if (browser) {
+            await browser.close();
+            browser = null;
+        }
+
+        if (retries > 0) {
+            console.log(`Retrying... ${retries} attempts remaining`);
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retry
+            return scrapeHypurrScan(retries - 1);
+        }
+
+        throw error;
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
     }
 }
-
-
-// async function scrapeHypurrScan() {
-//     try {
-//         const browser = await puppeteer.launch({ 
-//             headless: "new",
-//             args: ['--no-sandbox', '--disable-setuid-sandbox']
-//         });
-//         const page = await browser.newPage();
-
-//         // Enable console logging from the page
-//         page.on('console', msg => console.log('PAGE LOG:', msg.text()));
-
-//         await page.setDefaultNavigationTimeout(60000);
-        
-//         await page.goto('https://hypurrscan.io/dashboard', {
-//             waitUntil: 'networkidle0',
-//             timeout: 60000
-//         });
-
-//         // Wait for the specific card with auction information
-//         await page.waitForSelector('.v-card-text', { timeout: 30000 });
-
-//         // Extract all the data
-//         const data = await page.evaluate(() => {
-//             // Debug logging
-//             console.log('Starting data extraction');
-
-//             // Get all text content from the auction card
-//             const auctionCard = Array.from(document.querySelectorAll('.v-card-text'))
-//                 .find(card => card.textContent.includes('Next auction'));
-
-//             if (!auctionCard) {
-//                 console.log('Auction card not found');
-//                 return null;
-//             }
-
-//             console.log('Found auction card:', auctionCard.textContent);
-
-//             // Extract auction information
-//             const auctionInfo = auctionCard.querySelector('p:first-child');
-//             const nextAuctionText = auctionInfo ? auctionInfo.textContent : '';
-//             console.log('Next auction text:', nextAuctionText);
-
-//             // Extract last auctions
-//             const auctionElements = Array.from(auctionCard.querySelectorAll('p'))
-//                 .filter(p => p.textContent.includes('for'))
-//                 .map(p => {
-//                     const text = p.textContent;
-//                     console.log('Auction element text:', text);
-//                     const [name, price] = text.split(' for ');
-//                     return {
-//                         name: name.trim(),
-//                         price: price ? price.trim() : ''
-//                     };
-//                 });
-
-//             console.log('Extracted auctions:', auctionElements);
-
-//             return {
-//                 nextAuctionText,
-//                 auctionElements
-//             };
-//         });
-
-//         await browser.close();
-
-//         if (!data) {
-//             throw new Error('Failed to extract auction data');
-//         }
-
-//         console.log('Raw scraped data:', data);
-
-//         // Parse next auction time and starting price
-//         const timeMatch = data.nextAuctionText.match(/Next auction starts in (.*?)(?=Starting price)/i);
-//         const priceMatch = data.nextAuctionText.match(/Starting price\s*:\s*(\S+)/i);
-
-//         console.log('Parsed matches:', { timeMatch, priceMatch });
-
-//         // Format the message
-//         const formattedMessage = `
-// 🌟 Auction Update 🌟
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// ⏰ Next Auction Time:
-// ${timeMatch ? timeMatch[1].trim() : 'Loading...'}
-
-// 💰 Starting Price:
-// ${priceMatch ? priceMatch[1].trim() : 'Loading...'}
-
-// 🏆 Recent Auctions:
-// ${data.auctionElements.length > 0 
-//     ? data.auctionElements.map(auction => `${auction.name} for ${auction.price}`).join('\n')
-//     : 'Loading recent auctions...'}
-
-// 📊 Market Analysis:
-// Average Price: ${calculateAverage(data.auctionElements)}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ⏱ Updated: ${new Date().toLocaleString()}
-// 🌐 Source: hypurrscan.io
-
-// Commands:
-// 📊 /price - Get instant update
-// ⛔ /stop  - Stop notifications`;
-
-//         console.log('Formatted message:', formattedMessage);
-//         return formattedMessage;
-
-//     } catch (error) {
-//         console.error('Detailed scraping error:', error);
-//         return `⚠️ Error fetching auction data: ${error.message}\nPlease try again in a few moments.`;
-//     }
-// }
 
 // Helper function to calculate average price
 function calculateAverage(auctions) {
@@ -354,76 +329,4 @@ bot.launch()
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));async function scrapeHypurrScan() {
-    try {
-        const browser = await puppeteer.launch({ 
-            headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        const page = await browser.newPage();
-
-        await page.setDefaultNavigationTimeout(60000);
-        
-        await page.goto('https://hypurrscan.io/dashboard', {
-            waitUntil: 'networkidle0',
-            timeout: 60000
-        });
-
-        await page.waitForSelector('.v-card-text', { timeout: 30000 });
-
-        const data = await page.evaluate(() => {
-            // Debug logging
-            console.log('Starting data extraction');
-
-            // Get all text content from the auction card
-            const auctionCard = Array.from(document.querySelectorAll('.v-card-text'))
-                .find(card => card.textContent.includes('Next auction'));
-
-            if (!auctionCard) {
-                console.log('Auction card not found');
-                return null;
-            }
-
-            console.log('Found auction card:', auctionCard.textContent);
-
-            // Extract auction information
-            const auctionInfo = auctionCard.querySelector('p:first-child');
-            const nextAuctionText = auctionInfo ? auctionInfo.textContent : '';
-            console.log('Next auction text:', nextAuctionText);
-
-            // Extract last auctions
-            const auctionElements = Array.from(auctionCard.querySelectorAll('p'))
-                .filter(p => p.textContent.includes('for'))
-                .map(p => {
-                    const text = p.textContent;
-                    console.log('Auction element text:', text);
-                    const [name, price] = text.split(' for ');
-                    return {
-                        name: name.trim(),
-                        price: price ? price.trim() : ''
-                    };
-                });
-
-            console.log('Extracted auctions:', auctionElements);
-
-            return {
-                nextAuctionText,
-                auctionElements
-            };
-        });
-
-        await browser.close();
-
-        if (!data) {
-            throw new Error('Failed to extract auction data');
-        }
-
-        console.log('Raw scraped data:', data);
-
-        return data;
-
-    } catch (error) {
-        console.error('Scraping error:', error);
-        return null;
-    }
-}
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
