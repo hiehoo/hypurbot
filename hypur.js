@@ -12,6 +12,7 @@ if (!BOT_TOKEN) {
 
 // Initialize bot and active chat IDs
 const bot = new Telegraf(BOT_TOKEN);
+const ONE_HOUR = 60 * 60 * 1000; // 1 hour in milliseconds
 let activeChatIds = new Set();
 
 
@@ -275,7 +276,6 @@ bot.command('price', async (ctx) => {
     }
 });
 
-// Update function
 async function updatePrice() {
     const currentTime = new Date().toLocaleString();
     console.log(`Running price update at ${currentTime}`);
@@ -288,10 +288,10 @@ async function updatePrice() {
     try {
         console.log('Fetching new data...');
         const rawData = await scrapeHypurrScan();
-        
+
         if (rawData) {
             console.log('Data fetched successfully, formatting message...');
-            const formattedMessage = formatAuctionMessage(rawData, 'Hourly');
+            const formattedMessage = formatAuctionMessage(rawData, 'Update');
 
             console.log(`Sending updates to ${activeChatIds.size} active chats...`);
             for (const chatId of activeChatIds) {
@@ -317,83 +317,6 @@ async function updatePrice() {
     } catch (error) {
         console.error('Update price error:', error);
     }
-
-    // Log next update time
-    console.log(`Next update scheduled for: ${new Date(Date.now() + ONE_HOUR).toLocaleString()}`);
-}
-// Update function with immediate first run and hourly updates
-async function setupAutomaticUpdates() {
-    // First run immediately
-    console.log('Starting automatic updates...');
-    await updatePrice();
-
-    // Set up hourly updates
-    const ONE_HOUR = 60 * 60 * 1000; // 1 hour in milliseconds
-    
-    // Create an interval
-    const updateInterval = setInterval(async () => {
-        console.log(`Running scheduled update at ${new Date().toLocaleString()}`);
-        await updatePrice();
-    }, ONE_HOUR);
-
-    // Log next update time
-    console.log(`Next update scheduled for: ${new Date(Date.now() + ONE_HOUR).toLocaleString()}`);
-
-    // Handle cleanup on bot shutdown
-    process.once('SIGINT', () => {
-        clearInterval(updateInterval);
-        bot.stop('SIGINT');
-    });
-    process.once('SIGTERM', () => {
-        clearInterval(updateInterval);
-        bot.stop('SIGTERM');
-    });
-}
-
-// Update function with better logging and error handling
-async function updatePrice() {
-    const currentTime = new Date().toLocaleString();
-    console.log(`Running price update at ${currentTime}`);
-
-    if (activeChatIds.size === 0) {
-        console.log('No active chats to notify for price update');
-        return;
-    }
-
-    try {
-        console.log('Fetching new data...');
-        const rawData = await scrapeHypurrScan();
-        
-        if (rawData) {
-            console.log('Data fetched successfully, formatting message...');
-            const formattedMessage = formatAuctionMessage(rawData, 'Hourly');
-
-            console.log(`Sending updates to ${activeChatIds.size} active chats...`);
-            for (const chatId of activeChatIds) {
-                try {
-                    await bot.telegram.sendMessage(chatId, formattedMessage, { 
-                        parse_mode: 'HTML',
-                        disable_web_page_preview: true 
-                    });
-                    console.log(`Update sent successfully to chat ${chatId}`);
-                } catch (error) {
-                    console.error(`Failed to send price update to chat ${chatId}:`, error.message);
-                    if (error.message.includes('chat not found')) {
-                        activeChatIds.delete(chatId);
-                        console.log(`Removed invalid chat ID: ${chatId}`);
-                    }
-                }
-            }
-            console.log('Update cycle completed successfully');
-        } else {
-            console.error('Failed to fetch data');
-        }
-    } catch (error) {
-        console.error('Update price error:', error);
-    }
-
-    // Log next update time
-    console.log(`Next update scheduled for: ${new Date(Date.now() + ONE_HOUR).toLocaleString()}`);
 }
 
 // Modify your bot launch code to include the automatic updates
