@@ -294,16 +294,6 @@ async function updatePrice() {
     }
 }
 
-// Modify your bot launch code to include the automatic updates
-bot.launch()
-    .then(() => {
-        console.log('Bot started successfully');
-        console.log('Setting up automatic updates...');
-        setupAutomaticUpdates();
-        console.log('Send /start to the bot to begin monitoring');
-    })
-    .catch((err) => console.error('Bot failed to start:', err));
-
 // Add a command to check next update time
 bot.command('nextupdatetime', (ctx) => {
     const nextUpdate = new Date(Math.ceil(Date.now() / ONE_HOUR) * ONE_HOUR);
@@ -317,10 +307,12 @@ bot.command('forceupdate', async (ctx) => {
     ctx.reply('Update completed!');
 });
 
-// Launch bot
+// Single bot launch with all initialization
 bot.launch()
     .then(() => {
-        console.log('Bot started');
+        console.log('Bot started successfully');
+        console.log('Setting up automatic updates...');
+        setupAutomaticUpdates();
         console.log('Send /start to the bot to begin monitoring');
         // Initial update
         updatePrice().catch(error => console.error('Initial update failed:', error));
